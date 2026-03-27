@@ -40,7 +40,7 @@ export GOOGLE_APPLICATION_CREDENTIALS="$PWD/key.json"
 # ==============================
 # GET ACCESS TOKEN (ONLY ONCE 🔥)
 # ==============================
-ACCESS_TOKEN=$(gcloud auth application-default print-access-token)
+ACCESS_TOKEN=$(gcloud auth print-access-token)
 
 # ==============================
 # CREATE PROCESSOR (FAST API ✅)
