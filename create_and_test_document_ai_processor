@@ -6,7 +6,7 @@ set -e
 # ==============================
 export LOCATION="us"
 export PROJECT_ID=$(gcloud config get-value core/project)
-export SA_NAME="document-ai-sa"
+export SA_NAME="document-ai-service-account"
 
 # ==============================
 # INSTALL DEPENDENCIES (ONCE)
