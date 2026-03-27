@@ -1,0 +1,102 @@
+# ==============================
+# CONFIG
+# ==============================
+export LOCATION="us"
+export PROJECT_ID=$(gcloud config get-value core/project)
+export SA_NAME="document-ai-service-account"
+
+# ==============================
+# ENABLE API
+# ==============================
+gcloud services enable documentai.googleapis.com
+
+# ==============================
+# CREATE SERVICE ACCOUNT
+# ==============================
+gcloud iam service-accounts create $SA_NAME --display-name $SA_NAME
+
+gcloud projects add-iam-policy-binding ${PROJECT_ID} \
+--member="serviceAccount:$SA_NAME@${PROJECT_ID}.iam.gserviceaccount.com" \
+--role="roles/documentai.apiUser"
+
+# ==============================
+# CREATE KEY
+# ==============================
+gcloud iam service-accounts keys create key.json \
+--iam-account $SA_NAME@${PROJECT_ID}.iam.gserviceaccount.com
+
+export GOOGLE_APPLICATION_CREDENTIALS="$PWD/key.json"
+
+# ==============================
+# CREATE PROCESSOR (🔥 KEY STEP)
+# ==============================
+ACCESS_TOKEN=$(gcloud auth print-access-token)
+
+PROCESSOR_RESPONSE=$(curl -s -X POST \
+-H "Authorization: Bearer $ACCESS_TOKEN" \
+-H "Content-Type: application/json" \
+https://${LOCATION}-documentai.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/processors \
+-d '{
+  "type": "FORM_PARSER_PROCESSOR",
+  "displayName": "form-parser"
+}')
+
+echo $PROCESSOR_RESPONSE > processor.json
+
+# Extract PROCESSOR_ID
+export PROCESSOR_ID=$(cat processor.json | jq -r '.name' | awk -F'/' '{print $NF}')
+
+echo "Processor ID: $PROCESSOR_ID"
+
+# ==============================
+# DOWNLOAD FILE
+# ==============================
+gsutil cp gs://spls/gsp924/health-intake-form.pdf
+
+# ==============================
+# PREP REQUEST
+# ==============================
+echo '{"inlineDocument": {"mimeType": "application/pdf","content": "' > temp.json
+base64 health-intake-form.pdf >> temp.json
+echo '"}}' >> temp.json
+cat temp.json | tr -d '\n' > request.json
+
+# ==============================
+# PROCESS DOCUMENT
+# ==============================
+ACCESS_TOKEN=$(gcloud auth application-default print-access-token)
+
+curl -s -X POST \
+-H "Authorization: Bearer $ACCESS_TOKEN" \
+-H "Content-Type: application/json; charset=utf-8" \
+-d @request.json \
+https://${LOCATION}-documentai.googleapis.com/v1beta3/projects/${PROJECT_ID}/locations/${LOCATION}/processors/${PROCESSOR_ID}:process \
+> output.json
+
+# ==============================
+# INSTALL jq
+# ==============================
+sudo apt-get update -y
+sudo apt-get install -y jq
+
+echo "===== RAW TEXT ====="
+cat output.json | jq -r ".document.text"
+
+echo "===== FORM FIELDS ====="
+cat output.json | jq -r ".document.pages[].formFields"
+
+# ==============================
+# PYTHON PART
+# ==============================
+gsutil cp gs://spls/gsp924/synchronous_doc_ai.py .
+
+sudo apt-get install -y python3-pip
+python3 -m pip install --quiet --upgrade google-cloud-documentai google-cloud-storage prettytable
+
+python3 synchronous_doc_ai.py \
+--project_id=$PROJECT_ID \
+--processor_id=$PROCESSOR_ID \
+--location=us \
+--file_name=health-intake-form.pdf | tee results.txt
+
+echo "✅ FULL LAB COMPLETED (ZERO UI)"
