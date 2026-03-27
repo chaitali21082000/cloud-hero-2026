@@ -45,14 +45,20 @@ ACCESS_TOKEN=$(gcloud auth application-default print-access-token)
 # ==============================
 # CREATE PROCESSOR (FAST API ✅)
 # ==============================
-PROCESSOR_ID=$(curl -s -X POST \
+PROCESSOR_RESPONSE=$(curl -s -X POST \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   "https://${LOCATION}-documentai.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/processors" \
   -d '{
     "type": "FORM_PARSER_PROCESSOR",
     "displayName": "form-parser"
-  }' | jq -r '.name | split("/")[-1]')
+  }')
+
+# Debug (optional)
+echo "$PROCESSOR_RESPONSE" | jq .
+
+# Step 2: Extract ID safely
+PROCESSOR_ID=$(echo "$PROCESSOR_RESPONSE" | jq -r '.name' | awk -F'/' '{print $NF}')
 
 echo "Processor ID: $PROCESSOR_ID"
 
