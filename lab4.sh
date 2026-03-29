@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "🚀 Starting FAST execution..."
+echo "🚀 Starting execution..."
 
 # -------------------------------
 
@@ -18,22 +18,16 @@ echo "Project: $PROJECT_ID"
 
 # -------------------------------
 
-# ENABLE APIS (parallelized)
+# ENABLE APIS (SAFE)
 
 # -------------------------------
 
 echo "⚡ Enabling APIs..."
-gcloud services enable 
-documentai.googleapis.com 
-cloudfunctions.googleapis.com 
-cloudbuild.googleapis.com 
-geocoding-backend.googleapis.com &
-
-wait
+gcloud services enable documentai.googleapis.com cloudfunctions.googleapis.com cloudbuild.googleapis.com geocoding-backend.googleapis.com
 
 # -------------------------------
 
-# CREATE API KEY (fast + safe)
+# CREATE API KEY (NO ALPHA BUG)
 
 # -------------------------------
 
@@ -54,6 +48,7 @@ API_KEY=$(gcloud services api-keys get-key-string $KEY_NAME
 
 # Restrict API key
 
+echo "🔒 Restricting API key..."
 curl -s -X PATCH 
 -H "Authorization: Bearer $(gcloud auth print-access-token)" 
 -H "Content-Type: application/json" 
@@ -74,13 +69,11 @@ curl -s -X PATCH
 
 echo "📦 Downloading lab files..."
 mkdir -p ~/documentai-pipeline-demo
-gcloud storage cp -r 
-gs://spls/gsp927/documentai-pipeline-demo/* 
-~/documentai-pipeline-demo/ >/dev/null
+gcloud storage cp -r gs://spls/gsp927/documentai-pipeline-demo/* ~/documentai-pipeline-demo/ >/dev/null
 
 # -------------------------------
 
-# CREATE STORAGE
+# CREATE STORAGE BUCKETS
 
 # -------------------------------
 
@@ -91,11 +84,11 @@ gsutil mb -p $PROJECT_ID -l $REGION gs://${PROJECT_ID}-archived-invoices || true
 
 # -------------------------------
 
-# BIGQUERY
+# BIGQUERY SETUP
 
 # -------------------------------
 
-echo "📊 Creating BigQuery..."
+echo "📊 Creating BigQuery dataset..."
 bq --location=US mk -d ${PROJECT_ID}:invoice_parser_results || true
 
 cd ~/documentai-pipeline-demo/scripts/table-schema/
@@ -109,16 +102,16 @@ bq mk --table invoice_parser_results.geocode_details geocode_details.json || tru
 
 # -------------------------------
 
-echo "📨 Creating PubSub..."
+echo "📨 Creating Pub/Sub topic..."
 gcloud pubsub topics create $GEO_CODE_REQUEST_PUBSUB_TOPIC || true
 
 # -------------------------------
 
-# SERVICE ACCOUNT PERMISSIONS
+# IAM PERMISSIONS
 
 # -------------------------------
 
-echo "🔐 Setting IAM..."
+echo "🔐 Setting IAM permissions..."
 
 PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format="value(projectNumber)")
 
@@ -132,7 +125,7 @@ gcloud projects add-iam-policy-binding $PROJECT_ID
 
 # -------------------------------
 
-# CREATE PROCESSOR (fast)
+# CREATE DOCUMENT AI PROCESSOR
 
 # -------------------------------
 
@@ -152,7 +145,7 @@ echo "Processor ID: $PROCESSOR_ID"
 
 # -------------------------------
 
-# DEPLOY FUNCTIONS (with retry)
+# DEPLOY FUNCTIONS (RETRY SAFE)
 
 # -------------------------------
 
@@ -162,15 +155,17 @@ deploy() {
 NAME=$1
 shift
 
-for i in {1..5}; do
+for i in 1 2 3 4 5; do
 echo "Deploying $NAME (attempt $i)..."
 if gcloud functions deploy "$NAME" "$@"; then
+echo "✅ $NAME deployed"
 return 0
 fi
+echo "Retrying in 15s..."
 sleep 15
 done
 
-echo "❌ Failed: $NAME"
+echo "❌ Failed deploying $NAME"
 exit 1
 }
 
@@ -206,8 +201,6 @@ deploy geocode-addresses
 # -------------------------------
 
 echo "🧪 Uploading test files..."
-gsutil cp 
-gs://spls/gsp927/documentai-pipeline-demo/sample-files/* 
-gs://${PROJECT_ID}-input-invoices/ >/dev/null
+gsutil cp gs://spls/gsp927/documentai-pipeline-demo/sample-files/* gs://${PROJECT_ID}-input-invoices/ >/dev/null
 
-echo "🎉 DONE — Pipeline triggered!"
+echo "🎉 DONE! Pipeline triggered successfully!"
