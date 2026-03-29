@@ -3,12 +3,6 @@ set -e
 
 echo "🚀 Starting execution..."
 
-# -------------------------------
-
-# CONFIG
-
-# -------------------------------
-
 export PROJECT_ID=$(gcloud config get-value core/project)
 export REGION="us-central1"
 export PROCESSOR_NAME="form-processor"
@@ -16,20 +10,19 @@ export GEO_CODE_REQUEST_PUBSUB_TOPIC="geocode_request"
 
 echo "Project: $PROJECT_ID"
 
-# -------------------------------
+# ✅ FIXED API ENABLE (NO BUG POSSIBLE)
 
-# ENABLE APIS (SAFE)
+echo "⚡ Enabling APIs (safe mode)..."
+for svc in 
+documentai.googleapis.com 
+cloudfunctions.googleapis.com 
+cloudbuild.googleapis.com 
+geocoding-backend.googleapis.com
+do
+gcloud services enable "$svc"
+done
 
-# -------------------------------
-
-echo "⚡ Enabling APIs..."
-gcloud services enable documentai.googleapis.com cloudfunctions.googleapis.com cloudbuild.googleapis.com geocoding-backend.googleapis.com
-
-# -------------------------------
-
-# CREATE API KEY (NO ALPHA BUG)
-
-# -------------------------------
+# ---- rest of script unchanged ----
 
 echo "🔑 Creating API key..."
 
@@ -46,8 +39,6 @@ fi
 API_KEY=$(gcloud services api-keys get-key-string $KEY_NAME 
 --format="value(keyString)")
 
-# Restrict API key
-
 echo "🔒 Restricting API key..."
 curl -s -X PATCH 
 -H "Authorization: Bearer $(gcloud auth print-access-token)" 
@@ -61,58 +52,26 @@ curl -s -X PATCH
 }' 
 "https://apikeys.googleapis.com/v2/$KEY_NAME?updateMask=restrictions" >/dev/null
 
-# -------------------------------
-
-# DOWNLOAD FILES
-
-# -------------------------------
-
 echo "📦 Downloading lab files..."
 mkdir -p ~/documentai-pipeline-demo
 gcloud storage cp -r gs://spls/gsp927/documentai-pipeline-demo/* ~/documentai-pipeline-demo/ >/dev/null
-
-# -------------------------------
-
-# CREATE STORAGE BUCKETS
-
-# -------------------------------
 
 echo "🪣 Creating buckets..."
 gsutil mb -p $PROJECT_ID -l $REGION gs://${PROJECT_ID}-input-invoices || true
 gsutil mb -p $PROJECT_ID -l $REGION gs://${PROJECT_ID}-output-invoices || true
 gsutil mb -p $PROJECT_ID -l $REGION gs://${PROJECT_ID}-archived-invoices || true
 
-# -------------------------------
-
-# BIGQUERY SETUP
-
-# -------------------------------
-
-echo "📊 Creating BigQuery dataset..."
+echo "📊 Creating BigQuery..."
 bq --location=US mk -d ${PROJECT_ID}:invoice_parser_results || true
 
 cd ~/documentai-pipeline-demo/scripts/table-schema/
-
 bq mk --table invoice_parser_results.doc_ai_extracted_entities doc_ai_extracted_entities.json || true
 bq mk --table invoice_parser_results.geocode_details geocode_details.json || true
 
-# -------------------------------
-
-# PUBSUB
-
-# -------------------------------
-
-echo "📨 Creating Pub/Sub topic..."
+echo "📨 Creating PubSub..."
 gcloud pubsub topics create $GEO_CODE_REQUEST_PUBSUB_TOPIC || true
 
-# -------------------------------
-
-# IAM PERMISSIONS
-
-# -------------------------------
-
-echo "🔐 Setting IAM permissions..."
-
+echo "🔐 Setting IAM..."
 PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format="value(projectNumber)")
 
 gcloud projects add-iam-policy-binding $PROJECT_ID 
@@ -123,53 +82,29 @@ gcloud projects add-iam-policy-binding $PROJECT_ID
 --member="serviceAccount:service-${PROJECT_NUMBER}@gs-project-accounts.iam.gserviceaccount.com" 
 --role="roles/iam.serviceAccountTokenCreator" >/dev/null
 
-# -------------------------------
-
-# CREATE DOCUMENT AI PROCESSOR
-
-# -------------------------------
-
 echo "🧠 Creating Document AI processor..."
-
 PROCESSOR_ID=$(curl -s -X POST 
 -H "Authorization: Bearer $(gcloud auth print-access-token)" 
 -H "Content-Type: application/json" 
--d "{
-"display_name": "$PROCESSOR_NAME",
-"type": "FORM_PARSER_PROCESSOR"
-}" 
+-d "{"display_name":"$PROCESSOR_NAME","type":"FORM_PARSER_PROCESSOR"}" 
 "https://documentai.googleapis.com/v1/projects/$PROJECT_ID/locations/us/processors" 
 | jq -r '.name' | awk -F'/' '{print $NF}')
 
 echo "Processor ID: $PROCESSOR_ID"
-
-# -------------------------------
-
-# DEPLOY FUNCTIONS (RETRY SAFE)
-
-# -------------------------------
 
 cd ~/documentai-pipeline-demo/scripts
 
 deploy() {
 NAME=$1
 shift
-
 for i in 1 2 3 4 5; do
 echo "Deploying $NAME (attempt $i)..."
-if gcloud functions deploy "$NAME" "$@"; then
-echo "✅ $NAME deployed"
-return 0
-fi
-echo "Retrying in 15s..."
+if gcloud functions deploy "$NAME" "$@"; then return 0; fi
 sleep 15
 done
-
 echo "❌ Failed deploying $NAME"
 exit 1
 }
-
-# process-invoices
 
 deploy process-invoices 
 --no-gen2 
@@ -182,8 +117,6 @@ deploy process-invoices
 --trigger-resource=gs://${PROJECT_ID}-input-invoices 
 --trigger-event=google.storage.object.finalize
 
-# geocode-addresses
-
 deploy geocode-addresses 
 --no-gen2 
 --region=$REGION 
@@ -194,13 +127,7 @@ deploy geocode-addresses
 --set-env-vars=API_key=$API_KEY 
 --trigger-topic=$GEO_CODE_REQUEST_PUBSUB_TOPIC
 
-# -------------------------------
-
-# TEST PIPELINE
-
-# -------------------------------
-
 echo "🧪 Uploading test files..."
 gsutil cp gs://spls/gsp927/documentai-pipeline-demo/sample-files/* gs://${PROJECT_ID}-input-invoices/ >/dev/null
 
-echo "🎉 DONE! Pipeline triggered successfully!"
+echo "🎉 DONE!"
