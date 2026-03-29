@@ -23,18 +23,17 @@ REGION=$(gcloud compute project-info describe \
 export GEO_CODE_REQUEST_PUBSUB_TOPIC=geocode_request
 export BUCKET_LOCATION=$REGION
 
-# ================= TOKEN (REUSE) =================
 ACCESS_TOKEN=$(gcloud auth print-access-token)
 
-# ================= STEP 2 (PARALLEL BUCKETS) =================
+# ================= STEP 2 =================
 echo "${YELLOW}Creating buckets (parallel)${RESET}"
 
-gsutil mb -p "$PROJECT_ID" -l "$BUCKET_LOCATION" gs://${PROJECT_ID}-input-invoices & 
+gsutil mb -p "$PROJECT_ID" -l "$BUCKET_LOCATION" gs://${PROJECT_ID}-input-invoices &
 gsutil mb -p "$PROJECT_ID" -l "$BUCKET_LOCATION" gs://${PROJECT_ID}-output-invoices &
 gsutil mb -p "$PROJECT_ID" -l "$BUCKET_LOCATION" gs://${PROJECT_ID}-archived-invoices &
 wait
 
-# ================= STEP 3 (PARALLEL APIs) =================
+# ================= STEP 3 =================
 echo "${BLUE}Enabling APIs (parallel)${RESET}"
 
 gcloud services enable documentai.googleapis.com &
@@ -96,29 +95,28 @@ bq mk --table invoice_parser_results.geocode_details geocode_details.json >/dev/
 echo "${MAGENTA}Creating PubSub topic${RESET}"
 gcloud pubsub topics create ${GEO_CODE_REQUEST_PUBSUB_TOPIC} >/dev/null
 
-# ================= STEP 11 =================
-echo "${CYAN}IAM setup${RESET}"
+# ================= STEP 11 (FIXED) =================
+echo "${CYAN}Fixing IAM (CRITICAL)${RESET}"
 
-SA="service-$PROJECT_NUMBER@gs-project-accounts.iam.gserviceaccount.com"
-
-gcloud projects add-iam-policy-binding $PROJECT_ID \
---member="serviceAccount:$SA" \
---role="roles/pubsub.publisher" >/dev/null &
+# Get correct GCS service account
+GCS_SA=$(gsutil kms serviceaccount -p $PROJECT_ID)
 
 gcloud projects add-iam-policy-binding $PROJECT_ID \
---member="serviceAccount:$SA" \
---role="roles/iam.serviceAccountTokenCreator" >/dev/null &
-wait
+  --member="serviceAccount:$GCS_SA" \
+  --role="roles/pubsub.publisher" >/dev/null
+
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:$GCS_SA" \
+  --role="roles/iam.serviceAccountTokenCreator" >/dev/null
 
 # ================= STEP 12 =================
 cd ~/documentai-pipeline-demo/scripts
 export CLOUD_FUNCTION_LOCATION=$REGION
 
-# ================= DEPLOY FUNCTION (FAST RETRY) =================
+# ================= DEPLOY FUNCTION =================
 deploy() {
   NAME=$1
   shift
-
   for i in {1..10}; do
     echo "Deploying $NAME (Attempt $i)..."
     if gcloud functions deploy "$NAME" "$@" >/dev/null 2>&1; then
@@ -127,8 +125,7 @@ deploy() {
     fi
     sleep 10
   done
-
-  echo "❌ $NAME failed after retries"
+  echo "❌ $NAME failed"
   exit 1
 }
 
@@ -192,9 +189,12 @@ echo "${CYAN}Uploading sample files${RESET}"
 gsutil -m cp gs://spls/gsp927/documentai-pipeline-demo/sample-files/* \
 gs://${PROJECT_ID}-input-invoices/ >/dev/null
 
+# ================= CRITICAL WAIT =================
+echo "${YELLOW}Waiting for pipeline to process (IMPORTANT)${RESET}"
+sleep 60
+
 # ================= CLEANUP =================
 cd ~
-
 rm -f gsp* arc* shell* 2>/dev/null || true
 
-echo "${BOLD}${GREEN}🚀 LAB COMPLETED SUCCESSFULLY${RESET}"
+echo "${BOLD}${GREEN}🚀 LAB COMPLETED SUCCESSFULLY (TASK 7 FIXED)${RESET}"
